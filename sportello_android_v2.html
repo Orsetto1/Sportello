@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sportello Automatico</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+<style>
+:root {
+  --bg:        #0f1117;
+  --bg2:       #181c27;
+  --bg3:       #1f2438;
+  --border:    rgba(255,255,255,0.08);
+  --text:      #e8eaf0;
+  --text2:     #8b92a8;
+  --green:     #22c55e;
+  --green-dim: rgba(34,197,94,0.12);
+  --red:       #ef4444;
+  --red-dim:   rgba(239,68,68,0.12);
+  --blue:      #3b82f6;
+  --blue-dim:  rgba(59,130,246,0.12);
+  --amber:     #f59e0b;
+  --amber-dim: rgba(245,158,11,0.12);
+  --radius:    14px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:16px;padding-bottom:40px}
+
+/* HEADER */
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:14px 18px;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border)}
+.header-title{font-size:16px;font-weight:600}
+.header-sub{font-size:11px;color:var(--text2);margin-top:2px;font-family:monospace}
+.conn-dot{width:10px;height:10px;border-radius:50%;background:var(--red);box-shadow:0 0 0 3px var(--red-dim);transition:all .4s;flex-shrink:0}
+.conn-dot.online{background:var(--green);box-shadow:0 0 0 3px var(--green-dim)}
+
+/* STATUS */
+.status-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px}
+.status-icon{width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:25px;flex-shrink:0;background:var(--bg3);transition:all .3s}
+.status-icon.aperto{background:var(--green-dim)}
+.status-icon.chiuso{background:var(--blue-dim)}
+.status-icon.offline{background:var(--red-dim)}
+.status-label{font-size:12px;color:var(--text2);margin-bottom:2px}
+.status-value{font-size:19px;font-weight:700}
+.status-time{font-size:11px;color:var(--text2);margin-top:3px;font-family:monospace}
+
+/* ORA LEGALE CARD */
+.dst-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.dst-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.dst-title{font-size:14px;font-weight:600}
+.dst-sub{font-size:11px;color:var(--text2);margin-top:2px;line-height:1.4}
+.dst-auto{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)}
+.dst-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.dst-badge.solare{background:var(--blue-dim);color:#93c5fd}
+.dst-badge.legale{background:var(--amber-dim);color:#fcd34d}
+/* toggle generico */
+.tog{width:42px;height:24px;border-radius:12px;background:var(--bg3);border:none;cursor:pointer;position:relative;flex-shrink:0;appearance:none;-webkit-appearance:none;transition:background .2s}
+.tog::after{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.tog.on{background:var(--amber)}
+.tog.on::after{left:21px}
+.tog.green.on{background:var(--green)}
+
+/* SECTION TITLE */
+.section-title{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);margin:16px 0 8px}
+
+/* PULSANTI */
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.btn{padding:16px 10px;border-radius:var(--radius);border:1px solid var(--border);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;transition:all .15s;background:var(--bg2);color:var(--text);user-select:none}
+.btn:active,.btn.pressed{transform:scale(0.95)}
+.btn-icon{font-size:22px}
+.btn-apri{border-color:rgba(34,197,94,0.3)}
+.btn-apri:active,.btn-apri.pressed{background:var(--green-dim)}
+.btn-chiudi{border-color:rgba(59,130,246,0.3)}
+.btn-chiudi:active,.btn-chiudi.pressed{background:var(--blue-dim)}
+.btn-reset{grid-column:1/-1;flex-direction:row;justify-content:center;gap:10px;background:var(--red-dim);border-color:rgba(239,68,68,0.4);color:#fca5a5;padding:14px}
+.btn-reset:active,.btn-reset.pressed{background:rgba(239,68,68,0.25)}
+
+/* LOG */
+.log-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;height:80px;overflow-y:auto;font-family:monospace;font-size:11px;color:var(--text2);margin-bottom:4px}
+.log-box p{margin-bottom:2px}
+.log-ok{color:var(--green)}.log-err{color:var(--red)}.log-info{color:var(--amber)}
+
+/* SCHEDULE */
+.schedule-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:12px}
+.sch-head{display:flex;padding:7px 12px;gap:6px;border-bottom:1px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text2)}
+.h-day{width:76px;flex-shrink:0}.h-time{flex:1;text-align:center}.h-on{width:38px;flex-shrink:0;text-align:center}
+.sch-row{display:flex;align-items:center;padding:9px 12px;gap:6px;border-bottom:1px solid var(--border);transition:opacity .2s}
+.sch-row:last-child{border-bottom:none}
+.sch-row.off{opacity:.35}
+.day-lbl{width:76px;flex-shrink:0;font-size:12px;font-weight:500}
+.tg{flex:1;display:flex;align-items:center;gap:2px}
+.ts{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:7px 2px;text-align:center;-webkit-appearance:none;appearance:none;font-family:monospace}
+.ts:focus{outline:none;border-color:var(--blue)}
+.tsep{color:var(--text2);font-size:15px;padding:0 1px;flex-shrink:0}
+
+/* SALVA */
+.btn-salva{width:100%;padding:16px;border-radius:var(--radius);border:none;background:var(--blue);color:#fff;font-family:'DM Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px;transition:all .15s}
+.btn-salva:active,.btn-salva.pressed{transform:scale(0.97);opacity:.85}
+.btn-salva:disabled{opacity:.5}
+
+/* MODALE */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:300;opacity:0;pointer-events:none;transition:opacity .2s;padding:20px}
+.overlay.show{opacity:1;pointer-events:all}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:24px;width:100%;max-width:320px;text-align:center}
+.modal h3{font-size:17px;font-weight:700;margin-bottom:8px}
+.modal p{font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.5}
+.modal-btns{display:flex;gap:10px}
+.mbtn{flex:1;padding:13px;border-radius:12px;border:none;font-size:14px;font-weight:600;cursor:pointer}
+.mbtn-ann{background:var(--bg3);color:var(--text)}.mbtn-conf{background:var(--red);color:#fff}
+
+/* TOAST */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--bg3);border:1px solid var(--border);border-radius:30px;padding:10px 20px;font-size:13px;font-weight:500;transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.footer-note{font-size:10px;text-align:center;color:var(--text2);padding:4px 0 2px}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div>
+    <div class="header-title">🚪 Sportello Automatico</div>
+    <div class="header-sub" id="connLabel">Connessione in corso...</div>
+  </div>
+  <div class="conn-dot" id="connDot"></div>
+</div>
+
+<!-- STATUS -->
+<div class="status-card">
+  <div class="status-icon" id="statusIcon">🔒</div>
+  <div>
+    <div class="status-label">Stato sportello</div>
+    <div class="status-value" id="statusValue">Sconosciuto</div>
+    <div class="status-time"  id="statusTime">—</div>
+  </div>
+</div>
+
+<!-- ORA LEGALE -->
+<div class="dst-card">
+  <div class="dst-row">
+    <div>
+      <div class="dst-title">🕐 Ora legale</div>
+      <div class="dst-sub">Attiva per sincronizzare<br>correttamente Arduino con l'orario italiano</div>
+    </div>
+    <button class="tog green" id="togDST" onclick="toggleDST()"></button>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <span id="dstBadge" class="dst-badge solare">🌙 Ora solare (UTC+1)</span>
+    <span id="dstAuto" style="font-size:11px;color:var(--text2)">Auto</span>
+  </div>
+  <div class="dst-auto">
+    <button class="tog green" id="togAuto" onclick="toggleAuto()"></button>
+    <span>Rilevamento automatico (cambia a marzo/ottobre)</span>
+  </div>
+</div>
+
+<!-- CONTROLLO MANUALE -->
+<div class="section-title">Controllo manuale</div>
+<div class="btn-grid">
+  <button class="btn btn-apri"   id="btnApri">  <span class="btn-icon">🟢</span>APRI   </button>
+  <button class="btn btn-chiudi" id="btnChiudi"> <span class="btn-icon">🔵</span>CHIUDI </button>
+  <button class="btn btn-reset"  id="btnReset">  <span class="btn-icon">🔴</span>RESET EMERGENZA </button>
+</div>
+
+<!-- LOG -->
+<div class="section-title">Registro attività</div>
+<div class="log-box" id="logBox"><p class="log-info">App avviata...</p></div>
+
+<!-- PROGRAMMAZIONE -->
+<div class="section-title">Programmazione settimanale</div>
+<div class="schedule-wrap">
+  <div class="sch-head">
+    <span class="h-day">Giorno</span>
+    <span class="h-time">Apertura</span>
+    <span class="h-time">Chiusura</span>
+    <span class="h-on">On</span>
+  </div>
+  <div class="sch-row off" id="row0"><span class="day-lbl">Domenica</span> <div class="tg" id="tgA0"></div><div class="tg" id="tgC0"></div><button class="tog green" id="tog0" onclick="toggleGiorno(0)"></button></div>
+  <div class="sch-row off" id="row1"><span class="day-lbl">Lunedì</span>   <div class="tg" id="tgA1"></div><div class="tg" id="tgC1"></div><button class="tog green" id="tog1" onclick="toggleGiorno(1)"></button></div>
+  <div class="sch-row off" id="row2"><span class="day-lbl">Martedì</span>  <div class="tg" id="tgA2"></div><div class="tg" id="tgC2"></div><button class="tog green" id="tog2" onclick="toggleGiorno(2)"></button></div>
+  <div class="sch-row off" id="row3"><span class="day-lbl">Mercoledì</span><div class="tg" id="tgA3"></div><div class="tg" id="tgC3"></div><button class="tog green" id="tog3" onclick="toggleGiorno(3)"></button></div>
+  <div class="sch-row off" id="row4"><span class="day-lbl">Giovedì</span>  <div class="tg" id="tgA4"></div><div class="tg" id="tgC4"></div><button class="tog green" id="tog4" onclick="toggleGiorno(4)"></button></div>
+  <div class="sch-row off" id="row5"><span class="day-lbl">Venerdì</span>  <div class="tg" id="tgA5"></div><div class="tg" id="tgC5"></div><button class="tog green" id="tog5" onclick="toggleGiorno(5)"></button></div>
+  <div class="sch-row off" id="row6"><span class="day-lbl">Sabato</span>   <div class="tg" id="tgA6"></div><div class="tg" id="tgC6"></div><button class="tog green" id="tog6" onclick="toggleGiorno(6)"></button></div>
+</div>
+
+<!-- DURATA MOTORE -->
+<div class="dst-card" style="margin-bottom:14px">
+  <div class="dst-row" style="margin-bottom:12px">
+    <div>
+      <div class="dst-title">⚙️ Durata motore</div>
+      <div class="dst-sub">Tempo in secondi di attivazione<br>del motore per apertura e chiusura</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:10px">
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">🟢 APERTURA (sec)</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button onclick="cambiaDurata('apertura',-1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0">−</button>
+        <div id="lblApertura" style="flex:1;text-align:center;font-size:22px;font-weight:800;font-family:monospace">10s</div>
+        <button onclick="cambiaDurata('apertura',+1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0">+</button>
+      </div>
+    </div>
+    <div style="width:1px;background:var(--border);flex-shrink:0"></div>
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">🔵 CHIUSURA (sec)</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button onclick="cambiaDurata('chiusura',-1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0">−</button>
+        <div id="lblChiusura" style="flex:1;text-align:center;font-size:22px;font-weight:800;font-family:monospace">10s</div>
+        <button onclick="cambiaDurata('chiusura',+1)" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0">+</button>
+      </div>
+    </div>
+  </div>
+  <button class="btn-salva" id="btnMotore" style="background:#6366f1;margin-bottom:0">⚙️ Invia durata ad Arduino</button>
+</div>
+
+<button class="btn-salva" id="btnSalva">💾 Salva programmazione</button>
+<button class="btn-salva" id="btnSincOra" style="background:#6366f1;margin-bottom:10px">🕐 Sincronizza ora con Arduino</button>
+<div class="footer-note">broker: test.mosquitto.org · WSS 8081 · topic: sportello02121962</div>
+
+<!-- MODALE RESET -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>⚠️ Reset emergenza</h3>
+    <p>Confermi il reset?<br>Il motore si ferma immediatamente.</p>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-ann"  onclick="chiudiModale()">Annulla</button>
+      <button class="mbtn mbtn-conf" onclick="eseguiReset()">Conferma</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── CONFIG ─────────────────────────────────────── */
+var BROKER  = 'wss://test.mosquitto.org:8081/mqtt';
+var CID     = 'and_' + Math.random().toString(36).substr(2,8);
+var T_CMD   = 'sportello02121962/cmd';
+var T_STAT  = 'sportello02121962/status';
+var T_SCHED = 'sportello02121962/schedule';
+var T_DST   = 'sportello02121962/dst';
+var T_TIME  = 'sportello02121962/time';   /* sincronizzazione ora telefono → Arduino */
+var T_MOTOR = 'sportello02121962/motor';  /* durata motore in secondi */
+var GIORNI  = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+
+var mqttClient    = null;
+var online        = false;   /* telefono ↔ broker */
+var arduinoOnline = null;    /* null = sconosciuto, true/false da topic status */
+var toastTm       = null;
+var timerOra      = null;    /* un solo timer di invio ora, anche dopo le riconnessioni */
+
+/* ── ORA LEGALE ─────────────────────────────────── */
+var manualeDST = null;   // null = automatico
+var autoMode   = true;
+
+function ultimaDomenica(anno, mese) {
+  var d = new Date(anno, mese + 1, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+function calcolaAuto() {
+  var now    = new Date();
+  var anno   = now.getFullYear();
+  var inizio = ultimaDomenica(anno, 2); inizio.setHours(2,0,0,0);
+  var fine   = ultimaDomenica(anno, 9); fine.setHours(3,0,0,0);
+  return now >= inizio && now < fine;
+}
+function isOraLegale() {
+  return manualeDST !== null ? manualeDST : calcolaAuto();
+}
+function getOffset() { return isOraLegale() ? 7200 : 3600; }
+
+function inviaOra() {
+  if (!online) return false;
+  var now  = new Date();
+  var json = JSON.stringify({
+    anno:    now.getFullYear(),
+    mese:    now.getMonth() + 1,
+    giorno:  now.getDate(),
+    ora:     now.getHours(),
+    minuti:  now.getMinutes(),
+    secondi: now.getSeconds(),
+    wday:    now.getDay(),
+    offset:  getOffset()
+  });
+  mqttClient.publish(T_TIME, json, {qos:1}, function(e) {
+    if (!e) log('Ora telefono inviata ad Arduino: ' + now.toLocaleTimeString('it-IT'), 'ok');
+    else log('Errore invio ora: ' + e.message, 'err');
+  });
+  return true;
+}
+
+function aggiornaUIoraLegale() {
+  var legale = isOraLegale();
+  var tog    = document.getElementById('togDST');
+  var badge  = document.getElementById('dstBadge');
+  var info   = document.getElementById('dstAuto');
+  tog.classList.toggle('on', legale);
+  if (legale) {
+    badge.className   = 'dst-badge legale';
+    badge.textContent = '☀️ Ora legale (UTC+2)';
+  } else {
+    badge.className   = 'dst-badge solare';
+    badge.textContent = '🌙 Ora solare (UTC+1)';
+  }
+  info.textContent = autoMode
+    ? ('Auto · rilevato: ' + (calcolaAuto() ? 'legale' : 'solare'))
+    : 'Manuale';
+  /* Invia offset aggiornato ad Arduino se connesso */
+  if (online) {
+    mqttClient.publish(T_DST, String(getOffset()), {qos:1});
+    log('Offset NTP inviato ad Arduino: UTC+' + (getOffset()/3600), 'ok');
+  }
+}
+
+function toggleDST() {
+  autoMode   = false;
+  manualeDST = !isOraLegale();
+  document.getElementById('togAuto').classList.remove('on');
+  aggiornaUIoraLegale();
+  salvaLocale();
+  showToast(isOraLegale() ? '☀️ Ora legale attivata' : '🌙 Ora solare attivata');
+}
+function toggleAuto() {
+  autoMode   = !autoMode;
+  manualeDST = autoMode ? null : calcolaAuto();
+  document.getElementById('togAuto').classList.toggle('on', autoMode);
+  aggiornaUIoraLegale();
+  salvaLocale();
+  showToast(autoMode ? '🔄 Rilevamento automatico ON' : '✋ Modalità manuale');
+}
+
+/* ── PERSISTENZA LOCALE ─────────────────────────────────────
+   Salvato nel localStorage: sopravvive allo spegnimento.
+──────────────────────────────────────────────────────────── */
+var SCH_KEY   = 'sportello_schedule';
+var DST_KEY   = 'sportello_dst';
+var MOTOR_KEY = 'sportello_motor';
+
+var durataApertura = 10; /* secondi default */
+var durataChiusura = 10; /* secondi default */
+var sch = [];
+for (var i=0; i<7; i++) sch.push({g:i,oraA:8,minA:0,oraC:20,minC:0,on:false});
+
+function salvaLocale() {
+  try {
+    localStorage.setItem(SCH_KEY, JSON.stringify(sch));
+    localStorage.setItem(DST_KEY, JSON.stringify({auto:autoMode, manuale:manualeDST}));
+    localStorage.setItem(MOTOR_KEY, JSON.stringify({apertura:durataApertura, chiusura:durataChiusura}));
+  } catch(e) { log('Errore salvataggio locale: '+e, 'err'); }
+}
+
+function caricaLocale() {
+  try {
+    var datiSch = localStorage.getItem(SCH_KEY);
+    if (datiSch) {
+      var salvato = JSON.parse(datiSch);
+      if (salvato && salvato.length === 7) { sch = salvato; }
+    }
+    var datiMotor = localStorage.getItem(MOTOR_KEY);
+    if (datiMotor) {
+      var salvatoM = JSON.parse(datiMotor);
+      durataApertura = salvatoM.apertura || 10;
+      durataChiusura = salvatoM.chiusura || 10;
+    }
+    if (datiSch) return true;
+  } catch(e) { console.log('Errore caricamento: '+e); }
+  return false;
+}
+
+function caricaDST() {
+  try {
+    var datiDST = localStorage.getItem(DST_KEY);
+    if (datiDST) {
+      var salvato = JSON.parse(datiDST);
+      autoMode   = salvato.auto;
+      manualeDST = salvato.manuale;
+      return true;
+    }
+  } catch(e) { console.log('Errore caricamento DST: '+e); }
+  return false;
+}
+
+/* ── SELECT ORE/MINUTI ──────────────────────────── */
+function pad(n){return n<10?'0'+n:''+n}
+function makeHSel(id,val){
+  var s=document.createElement('select');s.className='ts';s.id=id;
+  s.onchange=function(){aggiorna(id)};
+  for(var h=0;h<24;h++){var o=document.createElement('option');o.value=h;o.textContent=pad(h);if(h===val)o.selected=true;s.appendChild(o)}
+  return s;
+}
+function makeMSel(id,val){
+  var s=document.createElement('select');s.className='ts';s.id=id;
+  s.onchange=function(){aggiorna(id)};
+  [0,5,10,15,20,25,30,35,40,45,50,55].forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=pad(m);if(m===val)o.selected=true;s.appendChild(o)});
+  return s;
+}
+function makeSep(){var sp=document.createElement('span');sp.className='tsep';sp.textContent=':';return sp}
+function buildSelects(){
+  for(var i=0;i<7;i++){
+    var a=document.getElementById('tgA'+i),c=document.getElementById('tgC'+i);
+    if(!a||!c)continue;
+    while(a.firstChild)a.removeChild(a.firstChild);
+    while(c.firstChild)c.removeChild(c.firstChild);
+    a.appendChild(makeHSel('aH'+i,sch[i].oraA));a.appendChild(makeSep());a.appendChild(makeMSel('aM'+i,sch[i].minA));
+    c.appendChild(makeHSel('cH'+i,sch[i].oraC));c.appendChild(makeSep());c.appendChild(makeMSel('cM'+i,sch[i].minC));
+  }
+}
+function aggiornaToggleGiorni(){
+  for(var i=0;i<7;i++){
+    document.getElementById('tog'+i).classList.toggle('on',sch[i].on);
+    document.getElementById('row'+i).classList.toggle('off',!sch[i].on);
+  }
+}
+function aggiorna(id){
+  var t=id.substring(0,2),idx=parseInt(id.substring(2)),v=parseInt(document.getElementById(id).value);
+  if(t==='aH')sch[idx].oraA=v;if(t==='aM')sch[idx].minA=v;if(t==='cH')sch[idx].oraC=v;if(t==='cM')sch[idx].minC=v;
+  salvaLocale();
+}
+function toggleGiorno(i){
+  sch[i].on=!sch[i].on;
+  document.getElementById('tog'+i).classList.toggle('on',sch[i].on);
+  document.getElementById('row'+i).classList.toggle('off',!sch[i].on);
+  salvaLocale();
+}
+
+/* ── MQTT ───────────────────────────────────────── */
+function connetti(){
+  log('Connessione broker...','info');
+  try{
+    mqttClient=mqtt.connect(BROKER,{clientId:CID,clean:true,reconnectPeriod:5000,connectTimeout:15000,keepalive:30,protocolVersion:4});
+    mqttClient.on('connect',function(){
+      online=true;setDot(true);
+      log('Connesso al broker','ok');
+      mqttClient.subscribe(T_STAT,{qos:1});  /* riceve subito lo stato retained di Arduino */
+      mqttClient.publish(T_DST,String(getOffset()),{qos:1});
+      log('Offset NTP: UTC+'+getOffset()/3600,'ok');
+      /* Invia ora subito e poi ogni 60 s — un solo timer anche dopo le riconnessioni */
+      setTimeout(inviaOra, 1500);
+      if (!timerOra) timerOra = setInterval(inviaOra, 60000);
+    });
+    mqttClient.on('message',function(t,p){if(t===T_STAT)aggiornaStato(p.toString())});
+    mqttClient.on('error',  function(e){log('Errore: '+e.message,'err')});
+    mqttClient.on('offline',function(){online=false;arduinoOnline=null;setDot(false);log('Disconnesso','err')});
+    mqttClient.on('reconnect',function(){log('Riconnessione...','info')});
+  }catch(e){log('Errore connessione: '+e.message,'err')}
+}
+
+function inviaMotore() {
+  if (!online) { showToast('❌ Non connesso!'); return; }
+  if (arduinoOnline === false) { showToast('⚠️ Arduino offline'); }
+  var json = JSON.stringify({apertura: durataApertura, chiusura: durataChiusura});
+  mqttClient.publish(T_MOTOR, json, {qos:1}, function(e) {
+    if (!e) {
+      log('Durata: Apri='+durataApertura+'s Chiudi='+durataChiusura+'s', 'ok');
+      if (arduinoOnline !== false) showToast('✓ Durata motore inviata');
+      salvaLocale();
+    } else { log('Errore durata motore', 'err'); }
+  });
+}
+function inviaCmd(cmd){
+  if(!online){showToast('❌ Non connesso!');return}
+  mqttClient.publish(T_CMD,cmd,{qos:1},function(e){
+    if(e){log('Errore '+cmd,'err');return}
+    log('Inviato: '+cmd,'ok');
+    if (arduinoOnline === false) showToast('⚠️ Arduino offline: '+cmd+' non ricevuto');
+    else showToast('✓ '+cmd+' inviato');
+  });
+}
+function salvaSchedule(){
+  if(!online){showToast('❌ Non connesso!');return}
+  if (arduinoOnline === false) { showToast('⚠️ Arduino offline'); }
+  var btn=document.getElementById('btnSalva');
+  btn.disabled=true;btn.textContent='⏳ Invio...';
+  var cnt=0;
+  for(var i=0;i<7;i++){
+    (function(idx){
+      var s=sch[idx];
+      var json='{"giorno":'+s.g+',"oraA":'+s.oraA+',"minA":'+s.minA+',"oraC":'+s.oraC+',"minC":'+s.minC+',"attivo":'+(s.on?'true':'false')+'}';
+      setTimeout(function(){
+        mqttClient.publish(T_SCHED,json,{qos:1},function(e){
+          if(!e){cnt++;log('Schedule '+GIORNI[idx]+' OK','ok');if(cnt===7){showToast('✅ Programmazione inviata!');btn.disabled=false;btn.innerHTML='💾 Salva programmazione'}}
+          else{log('Errore '+GIORNI[idx],'err');btn.disabled=false;btn.innerHTML='💾 Salva programmazione'}
+        });
+      },idx*350);
+    })(i);
+  }
+}
+
+/* ── MODALE ─────────────────────────────────────── */
+function confermaReset(){document.getElementById('overlay').classList.add('show')}
+function chiudiModale() {document.getElementById('overlay').classList.remove('show')}
+function eseguiReset()  {chiudiModale();inviaCmd('RESET')}
+
+/* ── UI ─────────────────────────────────────────── */
+function aggiornaStato(s){
+  var map={
+    'aperto':      {e:'🟢',l:'Aperto',           c:'aperto'},
+    'chiuso':      {e:'🔒',l:'Chiuso',           c:'chiuso'},
+    'reset':       {e:'🔴',l:'Reset eseguito',   c:''},
+    'online':      {e:'✅',l:'Arduino online',   c:''},
+    'offline':     {e:'⚠️',l:'Arduino offline',  c:'offline'},
+    'programma_ok':{e:'💾',l:'Programma OK',     c:''},
+    'motor_ok':    {e:'⚙️',l:'Durata impostata', c:''},
+    'ora_ok':      {e:'🕐',l:'Ora sincronizzata',c:''}
+  };
+  /* Qualsiasi messaggio diverso da "offline" significa che Arduino è vivo */
+  arduinoOnline = (s !== 'offline');
+  /* "ora_ok" arriva ogni minuto: aggiorno solo il log, non la scheda di stato */
+  if (s === 'ora_ok') { log('Arduino: ora sincronizzata','ok'); return; }
+  var info=map[s]||{e:'❓',l:s,c:''};
+  var now=new Date().toLocaleTimeString('it-IT');
+  document.getElementById('statusIcon').textContent=info.e;
+  document.getElementById('statusIcon').className='status-icon '+info.c;
+  document.getElementById('statusValue').textContent=info.l;
+  document.getElementById('statusTime').textContent='Aggiornato: '+now;
+  log('Stato: '+s, s==='offline'?'err':'ok');
+}
+function setDot(on){
+  document.getElementById('connDot').classList.toggle('online',on);
+  document.getElementById('connLabel').textContent=on?'Connesso · test.mosquitto.org':'Disconnesso';
+}
+function log(msg,tipo){
+  var b=document.getElementById('logBox'),p=document.createElement('p'),t=new Date().toLocaleTimeString('it-IT');
+  p.className=tipo==='ok'?'log-ok':tipo==='err'?'log-err':'log-info';
+  p.textContent='['+t+'] '+msg;b.appendChild(p);b.scrollTop=b.scrollHeight;
+}
+function showToast(msg){
+  var el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');
+  clearTimeout(toastTm);toastTm=setTimeout(function(){el.classList.remove('show')},2500);
+}
+
+/* ── TOUCH HANDLER ──────────────────────────────────────────
+   Esegue il comando al rilascio del dito, UNA sola volta
+   (preventDefault blocca il click sintetico che lo duplicava)
+   e non lo esegue se il dito si è spostato (scorrimento pagina).
+──────────────────────────────────────────────────────────── */
+function tapBtn(id, fn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var x0 = 0, y0 = 0, attivo = false;
+  el.addEventListener('touchstart', function(e) {
+    var t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; attivo = true;
+    el.classList.add('pressed');
+  }, {passive: true});
+  el.addEventListener('touchmove', function(e) {
+    var t = e.touches[0];
+    if (Math.abs(t.clientX - x0) > 10 || Math.abs(t.clientY - y0) > 10) {
+      attivo = false; el.classList.remove('pressed');
+    }
+  }, {passive: true});
+  el.addEventListener('touchend', function(e) {
+    el.classList.remove('pressed');
+    if (attivo) { attivo = false; e.preventDefault(); if (!el.disabled) fn(); }
+  }, {passive: false});
+  el.addEventListener('touchcancel', function() {
+    attivo = false; el.classList.remove('pressed');
+  }, {passive: true});
+  /* Mouse / desktop */
+  el.addEventListener('click', function() { fn(); });
+}
+
+function cambiaDurata(tipo, delta) {
+  if (tipo === 'apertura') {
+    durataApertura = Math.min(60, Math.max(1, durataApertura + delta));
+    document.getElementById('lblApertura').textContent = durataApertura + 's';
+  } else {
+    durataChiusura = Math.min(60, Math.max(1, durataChiusura + delta));
+    document.getElementById('lblChiusura').textContent = durataChiusura + 's';
+  }
+  salvaLocale();
+}
+
+function aggiornaLblMotore() {
+  document.getElementById('lblApertura').textContent = durataApertura + 's';
+  document.getElementById('lblChiusura').textContent = durataChiusura + 's';
+}
+
+/* ── AVVIO ──────────────────────────────────────── */
+var scheduleRipristinata = caricaLocale();
+var dstRipristinato      = caricaDST();
+
+if (!dstRipristinato) { autoMode = true; manualeDST = null; }
+document.getElementById('togAuto').classList.toggle('on', autoMode);
+aggiornaUIoraLegale();
+
+buildSelects();
+aggiornaToggleGiorni();
+aggiornaLblMotore();
+
+if (scheduleRipristinata) {
+  setTimeout(function() { showToast('📂 Programmazione ripristinata!'); }, 1500);
+}
+
+tapBtn('btnSalva',   function() { salvaSchedule(); });
+tapBtn('btnMotore',  function() { inviaMotore(); });
+tapBtn('btnSincOra', function() {
+  if (inviaOra()) showToast('🕐 Ora sincronizzata con Arduino!');
+  else showToast('❌ Non connesso!');
+});
+tapBtn('btnApri',   function() { inviaCmd('APRI'); });
+tapBtn('btnChiudi', function() { inviaCmd('CHIUDI'); });
+tapBtn('btnReset',  function() { confermaReset(); });
+
+setTimeout(function() {
+  if (typeof mqtt !== 'undefined') connetti();
+  else log('Libreria MQTT non disponibile (serve internet)','err');
+}, 500);
+</script>
+</body>
+</html>

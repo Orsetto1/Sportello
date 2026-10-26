@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+<!-- PWA — rende l'app installabile su iPhone (compatibile iOS 15+) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sportello">
+<meta name="application-name" content="Sportello">
+<meta name="theme-color" content="#0f1117">
+<meta name="description" content="Controllo sportello automatico via MQTT">
+
+<!-- Icona app sulla schermata Home -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f1117'/%3E%3Ctext y='130' x='90' text-anchor='middle' font-size='110' fill='white'%3E%F0%9F%9A%AA%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='28' font-size='28'%3E%F0%9F%9A%AA%3C/text%3E%3C/svg%3E">
+
+<title>🚪 Sportello Automatico</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+
+<style>
+:root {
+  --bg:        #0f1117;
+  --bg2:       #181c27;
+  --bg3:       #1f2438;
+  --border:    rgba(255,255,255,0.09);
+  --text:      #e8eaf0;
+  --text2:     #8b92a8;
+  --green:     #22c55e;
+  --green-dim: rgba(34,197,94,0.13);
+  --red:       #ef4444;
+  --red-dim:   rgba(239,68,68,0.13);
+  --blue:      #3b82f6;
+  --blue-dim:  rgba(59,130,246,0.13);
+  --amber:     #f59e0b;
+  --amber-dim: rgba(245,158,11,0.13);
+  --indigo:    #6366f1;
+  --radius:    16px;
+  --safe-top:    env(safe-area-inset-top,    20px);
+  --safe-bottom: env(safe-area-inset-bottom, 20px);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box; margin: 0; padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html { height: 100%; }
+
+body {
+  font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh;    /* fallback per iOS precedenti */
+  min-height: 100dvh;
+  padding: calc(var(--safe-top) + 12px) 16px calc(var(--safe-bottom) + 20px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── BANNER INSTALLAZIONE ─────────────────────────── */
+.install-banner {
+  background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(59,130,246,0.15));
+  border: 1px solid rgba(99,102,241,0.4);
+  border-radius: var(--radius); padding: 14px 16px;
+  margin-bottom: 14px; display: none;
+  position: relative;
+}
+.install-banner.show { display: block; }
+.install-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.install-steps { font-size: 12px; color: #c7d2fe; line-height: 1.8; }
+.install-steps span {
+  display: inline-block; background: rgba(99,102,241,0.3);
+  border-radius: 6px; padding: 1px 7px; margin: 1px 2px;
+  font-weight: 600; font-size: 11px;
+}
+.install-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: none; color: var(--text2);
+  font-size: 18px; cursor: pointer; padding: 4px;
+  -webkit-appearance: none;
+}
+
+/* ── HEADER ───────────────────────────────────────── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; padding: 14px 16px;
+  background: var(--bg2); border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.header-left { display: flex; align-items: center; }
+.header-icon { font-size: 28px; margin-right: 10px; }
+.header-title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
+.header-sub   { font-size: 11px; color: var(--text2); margin-top: 1px; }
+.conn-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 0 3px var(--red-dim);
+  transition: all .4s; flex-shrink: 0;
+}
+.conn-dot.online { background: var(--green); box-shadow: 0 0 0 3px var(--green-dim); }
+
+/* ── STATUS ───────────────────────────────────────── */
+.status-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+  display: flex; align-items: center;
+}
+.status-icon {
+  width: 56px; height: 56px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; flex-shrink: 0; background: var(--bg3);
+  transition: all .3s; margin-right: 14px;
+}
+.status-icon.aperto  { background: var(--green-dim); }
+.status-icon.chiuso  { background: var(--blue-dim);  }
+.status-icon.offline { background: var(--red-dim);   }
+.status-label { font-size: 12px; color: var(--text2); margin-bottom: 2px; font-weight: 500; }
+.status-value { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.status-time  { font-size: 11px; color: var(--text2); margin-top: 3px; }
+
+/* ── SECTION TITLE ────────────────────────────────── */
+.section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text2); margin: 16px 0 8px;
+}
+
+/* ── PULSANTI CONTROLLO ───────────────────────────── */
+.btn-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.btn {
+  flex: 1; padding: 18px 10px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  font-family: -apple-system, sans-serif;
+  font-size: 15px; font-weight: 700;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 8px;
+  background: var(--bg2); color: var(--text);
+  -webkit-user-select: none; user-select: none;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+  transition: transform .12s, background .12s;
+}
+.btn.pressed { transform: scale(0.93); }
+.btn-icon { font-size: 26px; }
+.btn-apri   { border-color: rgba(34,197,94,0.4); }
+.btn-apri.pressed   { background: var(--green-dim); }
+.btn-chiudi { border-color: rgba(59,130,246,0.4); }
+.btn-chiudi.pressed { background: var(--blue-dim); }
+
+.btn-reset {
+  width: 100%; flex-direction: row; justify-content: center; gap: 12px;
+  background: var(--red-dim); border-color: rgba(239,68,68,0.4);
+  color: #fca5a5; padding: 16px; margin-bottom: 10px; font-size: 15px;
+}
+.btn-reset.pressed { background: rgba(239,68,68,0.3); }
+
+/* ── ORA LEGALE ───────────────────────────────────── */
+.dst-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+}
+.dst-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.dst-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+.dst-sub   { font-size: 11px; color: var(--text2); line-height: 1.5; }
+.dst-badge {
+  display: inline-block;
+  padding: 4px 11px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.dst-badge.solare { background: var(--blue-dim);  color: #93c5fd; }
+.dst-badge.legale { background: var(--amber-dim); color: #fcd34d; }
+.dst-divider { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.dst-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dst-row-label { font-size: 12px; color: var(--text2); line-height: 1.5; }
+.dst-row-label strong { color: var(--text); font-weight: 600; }
+
+/* ── TOGGLE ───────────────────────────────────────── */
+.tog {
+  width: 46px; height: 28px; border-radius: 14px;
+  background: var(--bg3); border: none; cursor: pointer;
+  position: relative; flex-shrink: 0;
+  -webkit-appearance: none; appearance: none;
+  transition: background .22s;
+}
+.tog::after {
+  content: ''; position: absolute;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; top: 3px; left: 3px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
+  transition: left .22s;
+}
+.tog.on { background: var(--green); }
+.tog.on::after { left: 21px; }
+.tog.amber.on { background: var(--amber); }
+
+/* ── LOG ──────────────────────────────────────────── */
+.log-box {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+  height: 82px; overflow-y: auto; font-size: 11px;
+  color: var(--text2); margin-bottom: 4px; font-family: monospace;
+  -webkit-overflow-scrolling: touch;
+}
+.log-box p { margin-bottom: 2px; line-height: 1.4; }
+.log-ok  { color: var(--green); }
+.log-err { color: var(--red);   }
+.log-info{ color: var(--amber); }
+
+/* ── SCHEDULE ─────────────────────────────────────── */
+.schedule-wrap {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; margin-bottom: 12px;
+}
+.sch-head {
+  display: flex; padding: 8px 12px; gap: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--text2);
+}
+.h-day  { width: 78px; flex-shrink: 0; }
+.h-time { flex: 1; text-align: center; }
+.h-on   { width: 46px; flex-shrink: 0; text-align: center; }
+.sch-row {
+  display: flex; align-items: center;
+  padding: 10px 12px; gap: 6px;
+  border-bottom: 1px solid var(--border); transition: opacity .2s;
+}
+.sch-row:last-child { border-bottom: none; }
+.sch-row.off { opacity: .35; }
+.day-lbl { width: 78px; flex-shrink: 0; font-size: 12px; font-weight: 600; }
+.tg { flex: 1; display: flex; align-items: center; gap: 2px; }
+.ts {
+  flex: 1; min-width: 0; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 9px; color: var(--text); font-size: 16px;  /* 16px evita lo zoom automatico di Safari */
+  padding: 7px 2px; text-align: center; text-align-last: center;
+  -webkit-appearance: none; appearance: none;
+  font-family: -apple-system, monospace; cursor: pointer;
+}
+.ts:focus { outline: none; border-color: var(--blue); }
+.tsep { color: var(--text2); font-size: 16px; padding: 0 1px; flex-shrink: 0; }
+
+/* ── DURATA MOTORE ────────────────────────────────── */
+.motor-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+}
+.motor-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.motor-row { display: flex; gap: 12px; margin-bottom: 10px; }
+.motor-group { flex: 1; }
+.motor-label { font-size: 11px; color: var(--text2); font-weight: 600; margin-bottom: 7px; text-transform: uppercase; letter-spacing: .05em; }
+.motor-ctrl {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg3); border-radius: 10px; padding: 4px;
+}
+.motor-btn {
+  width: 38px; height: 38px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg2);
+  color: var(--text); font-size: 20px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-appearance: none; appearance: none;
+  transition: transform .1s;
+}
+.motor-btn:active { transform: scale(0.9); background: var(--blue-dim); }
+.motor-val { flex: 1; text-align: center; font-size: 22px; font-weight: 800; font-family: monospace; }
+
+/* ── PULSANTI AZIONE ──────────────────────────────── */
+.btn-action {
+  width: 100%; padding: 17px;
+  border-radius: var(--radius); border: none;
+  font-family: -apple-system, sans-serif;
+  font-size: 15px; font-weight: 800;
+  cursor: pointer; -webkit-appearance: none; appearance: none;
+  transition: transform .12s, opacity .12s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.btn-action.pressed { transform: scale(0.97); }
+.btn-action:disabled { opacity: .5; }
+.btn-salva  { background: var(--blue);   color: #fff; }
+.btn-sinc   { background: var(--indigo); color: #fff; }
+.btn-motor  { background: #0891b2;       color: #fff; }
+
+/* ── SEZIONE DISINSTALLA ──────────────────────────── */
+.uninstall-section {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+}
+.uninstall-toggle {
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+}
+.uninstall-toggle-title { font-size: 13px; font-weight: 600; color: var(--text2); }
+.uninstall-content { display: none; margin-top: 12px; }
+.uninstall-content.show { display: block; }
+.uninstall-steps-list { font-size: 12px; color: var(--text2); line-height: 2; margin-bottom: 12px; }
+.uninstall-steps-list li { margin-left: 16px; }
+.btn-uninstall {
+  width: 100%; padding: 14px;
+  border-radius: 12px; border: 1px solid rgba(239,68,68,0.4);
+  background: var(--red-dim); color: #fca5a5;
+  font-family: -apple-system, sans-serif;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+
+/* ── MODALE RESET ─────────────────────────────────── */
+.overlay {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(0,0,0,.78);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 300; opacity: 0; pointer-events: none; transition: opacity .2s;
+  padding: 0 16px calc(var(--safe-bottom) + 20px);
+}
+.overlay.show { opacity: 1; pointer-events: auto; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 22px; padding: 24px 20px 20px;
+  width: 100%; max-width: 400px; text-align: center;
+  transform: translateY(40px);
+  transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+}
+.overlay.show .modal { transform: translateY(0); }
+.modal h3 { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+.modal p  { font-size: 13px; color: var(--text2); margin-bottom: 22px; line-height: 1.55; }
+.modal-btns { display: flex; gap: 10px; }
+.mbtn {
+  flex: 1; padding: 14px; border-radius: 14px; border: none;
+  font-family: -apple-system, sans-serif;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.mbtn-ann  { background: var(--bg3); color: var(--text); }
+.mbtn-conf { background: var(--red); color: #fff; }
+
+/* ── TOAST ────────────────────────────────────────── */
+.toast {
+  position: fixed; bottom: calc(var(--safe-bottom) + 24px); left: 50%;
+  -webkit-transform: translateX(-50%) translateY(120px);
+  transform: translateX(-50%) translateY(120px);
+  background: rgba(28,32,48,0.96); border: 1px solid var(--border);
+  border-radius: 30px; padding: 11px 22px;
+  font-size: 13px; font-weight: 600; z-index: 400; white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.toast.show {
+  -webkit-transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(0);
+}
+.footer-note { font-size: 10px; text-align: center; color: var(--text2); padding: 6px 0 2px; }
+</style>
+</head>
+<body>
+
+<!-- BANNER INSTALLAZIONE (appare solo in Safari non-standalone) -->
+<div class="install-banner" id="installBanner">
+  <button class="install-close" onclick="chiudiBanner()">✕</button>
+  <div class="install-title">📲 Installa come app sul tuo iPhone</div>
+  <div class="install-steps">
+    1. Tocca <span>Condividi</span> &#9633;↑ nella barra di Safari<br>
+    2. Scorri e tocca <span>Aggiungi a schermata Home</span><br>
+    3. Tocca <span>Aggiungi</span> in alto a destra<br>
+    ✅ L'icona 🚪 apparirà sulla schermata Home
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <span class="header-icon">🚪</span>
+    <div>
+      <div class="header-title">Sportello Auto</div>
+      <div class="header-sub" id="connLabel">Connessione in corso...</div>
+    </div>
+  </div>
+  <div class="conn-dot" id="connDot"></div>
+</div>
+
+<!-- STATUS -->
+<div class="status-card">
+  <div class="status-icon" id="statusIcon">🔒</div>
+  <div>
+    <div class="status-label">Stato sportello</div>
+    <div class="status-value" id="statusValue">Sconosciuto</div>
+    <div class="status-time"  id="statusTime">—</div>
+  </div>
+</div>
+
+<!-- CONTROLLO MANUALE -->
+<div class="section-title">Controllo manuale</div>
+<div class="btn-row">
+  <button class="btn btn-apri"   id="btnApri">  <span class="btn-icon">🟢</span>APRI   </button>
+  <button class="btn btn-chiudi" id="btnChiudi"> <span class="btn-icon">🔵</span>CHIUDI </button>
+</div>
+<button class="btn btn-reset" id="btnReset" style="width:100%;display:flex">
+  <span class="btn-icon">🔴</span> RESET EMERGENZA
+</button>
+
+<!-- ORA LEGALE -->
+<div class="dst-card">
+  <div class="dst-top">
+    <div>
+      <div class="dst-title">🕐 Ora legale</div>
+      <div class="dst-sub">Sincronizza Arduino<br>con l'orario italiano corretto</div>
+    </div>
+    <span id="dstBadge" class="dst-badge solare">🌙 Ora solare (UTC+1)</span>
+  </div>
+  <div class="dst-row" style="margin-bottom:10px">
+    <div class="dst-row-label"><strong>Interruttore manuale</strong><br>Forza ora legale ON o OFF</div>
+    <button class="tog amber" id="togDST" onclick="toggleDST()"></button>
+  </div>
+  <hr class="dst-divider">
+  <div class="dst-row">
+    <div class="dst-row-label"><strong>Rilevamento automatico</strong><br>Cambia da solo a marzo e ottobre</div>
+    <button class="tog" id="togAuto" onclick="toggleAuto()"></button>
+  </div>
+</div>
+
+<!-- LOG -->
+<div class="section-title">Registro attività</div>
+<div class="log-box" id="logBox"><p class="log-info">App avviata...</p></div>
+
+<!-- PROGRAMMAZIONE -->
+<div class="section-title">Programmazione settimanale</div>
+<div class="schedule-wrap">
+  <div class="sch-head">
+    <span class="h-day">Giorno</span>
+    <span class="h-time">Apertura</span>
+    <span class="h-time">Chiusura</span>
+    <span class="h-on">On</span>
+  </div>
+  <div class="sch-row off" id="row0"><span class="day-lbl">Domenica</span> <div class="tg" id="tgA0"></div><div class="tg" id="tgC0"></div><button class="tog" id="tog0" onclick="toggleGiorno(0)"></button></div>
+  <div class="sch-row off" id="row1"><span class="day-lbl">Lunedì</span>   <div class="tg" id="tgA1"></div><div class="tg" id="tgC1"></div><button class="tog" id="tog1" onclick="toggleGiorno(1)"></button></div>
+  <div class="sch-row off" id="row2"><span class="day-lbl">Martedì</span>  <div class="tg" id="tgA2"></div><div class="tg" id="tgC2"></div><button class="tog" id="tog2" onclick="toggleGiorno(2)"></button></div>
+  <div class="sch-row off" id="row3"><span class="day-lbl">Mercoledì</span><div class="tg" id="tgA3"></div><div class="tg" id="tgC3"></div><button class="tog" id="tog3" onclick="toggleGiorno(3)"></button></div>
+  <div class="sch-row off" id="row4"><span class="day-lbl">Giovedì</span>  <div class="tg" id="tgA4"></div><div class="tg" id="tgC4"></div><button class="tog" id="tog4" onclick="toggleGiorno(4)"></button></div>
+  <div class="sch-row off" id="row5"><span class="day-lbl">Venerdì</span>  <div class="tg" id="tgA5"></div><div class="tg" id="tgC5"></div><button class="tog" id="tog5" onclick="toggleGiorno(5)"></button></div>
+  <div class="sch-row off" id="row6"><span class="day-lbl">Sabato</span>   <div class="tg" id="tgA6"></div><div class="tg" id="tgC6"></div><button class="tog" id="tog6" onclick="toggleGiorno(6)"></button></div>
+</div>
+
+<button class="btn-action btn-salva" id="btnSalva">💾 Salva programmazione</button>
+
+<!-- DURATA MOTORE -->
+<div class="motor-card">
+  <div class="motor-title">⚙️ Durata motore</div>
+  <div class="motor-row">
+    <div class="motor-group">
+      <div class="motor-label">🟢 Apertura (sec)</div>
+      <div class="motor-ctrl">
+        <button class="motor-btn" id="btnAM" onclick="cambiaDurata('apertura',-1)">−</button>
+        <div class="motor-val" id="lblApertura">10s</div>
+        <button class="motor-btn" id="btnAP" onclick="cambiaDurata('apertura',+1)">+</button>
+      </div>
+    </div>
+    <div class="motor-group">
+      <div class="motor-label">🔵 Chiusura (sec)</div>
+      <div class="motor-ctrl">
+        <button class="motor-btn" id="btnCM" onclick="cambiaDurata('chiusura',-1)">−</button>
+        <div class="motor-val" id="lblChiusura">10s</div>
+        <button class="motor-btn" id="btnCP" onclick="cambiaDurata('chiusura',+1)">+</button>
+      </div>
+    </div>
+  </div>
+  <button class="btn-action btn-motor" id="btnMotore">⚙️ Invia durata ad Arduino</button>
+</div>
+
+<button class="btn-action btn-sinc" id="btnSincOra">🕐 Sincronizza ora con Arduino</button>
+
+<!-- DISINSTALLAZIONE -->
+<div class="uninstall-section">
+  <div class="uninstall-toggle" onclick="toggleDisinstalla()">
+    <span class="uninstall-toggle-title">🗑️ Disinstalla app dall'iPhone</span>
+    <span id="uninstallArrow" style="color:var(--text2);font-size:14px">▼</span>
+  </div>
+  <div class="uninstall-content" id="uninstallContent">
+    <div class="uninstall-steps-list">
+      <b>Metodo 1 — Dalla schermata Home:</b>
+      <ol>
+        <li>Tieni premuta l'icona 🚪 sulla schermata Home</li>
+        <li>Tocca <b>"Rimuovi app"</b></li>
+        <li>Conferma l'eliminazione</li>
+      </ol>
+      <br>
+      <b>Metodo 2 — Cancella tutti i dati:</b>
+      <ol>
+        <li>Vai in <b>Impostazioni → Safari</b></li>
+        <li>Tocca <b>"Cancella cronologia e dati siti web"</b></li>
+        <li>Conferma — rimuove anche i dati salvati dell'app</li>
+      </ol>
+    </div>
+    <button class="btn-uninstall" onclick="cancellaDatiApp()">
+      🗑️ Cancella tutti i dati dell'app ora
+    </button>
+  </div>
+</div>
+
+<div class="footer-note">broker: test.mosquitto.org · topic: sportello02121962</div>
+
+<!-- MODALE RESET -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>⚠️ Reset emergenza</h3>
+    <p>Confermi il reset di emergenza?<br>Il motore si ferma immediatamente.</p>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-ann"  onclick="chiudiModale()">Annulla</button>
+      <button class="mbtn mbtn-conf" onclick="eseguiReset()">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── CONFIG ─────────────────────────────────────── */
+var BROKER   = 'wss://test.mosquitto.org:8081/mqtt';
+var CID      = 'ios_' + Math.random().toString(36).substr(2,9);
+var T_CMD    = 'sportello02121962/cmd';
+var T_STAT   = 'sportello02121962/status';
+var T_SCHED  = 'sportello02121962/schedule';
+var T_DST    = 'sportello02121962/dst';
+var T_TIME   = 'sportello02121962/time';
+var T_MOTOR  = 'sportello02121962/motor';
+var GIORNI   = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+
+/* ── STORAGE KEYS ────────────────────────────────── */
+var SCH_KEY   = 'sportello_schedule';
+var DST_KEY   = 'sportello_dst';
+var MOTOR_KEY = 'sportello_motor';
+
+var mqttClient     = null;
+var online         = false;   /* telefono ↔ broker */
+var arduinoOnline  = null;    /* null = sconosciuto, true/false da topic status */
+var toastTm        = null;
+var timerOra       = null;    /* un solo timer di invio ora */
+var manualeDST     = null;
+var autoMode       = true;
+var durataApertura = 10;
+var durataChiusura = 10;
+
+var sch = [];
+for (var i = 0; i < 7; i++) {
+  sch.push({g:i, oraA:8, minA:0, oraC:20, minC:0, on:false});
+}
+
+/* ── BANNER INSTALLAZIONE ────────────────────────── */
+var isIOS        = /iphone|ipad|ipod/i.test(navigator.userAgent);
+var isStandalone = window.navigator.standalone === true;
+
+if (isIOS && !isStandalone) {
+  document.getElementById('installBanner').classList.add('show');
+}
+function chiudiBanner() {
+  document.getElementById('installBanner').classList.remove('show');
+}
+
+/* ── DISINSTALLAZIONE ────────────────────────────── */
+function toggleDisinstalla() {
+  var c = document.getElementById('uninstallContent');
+  var a = document.getElementById('uninstallArrow');
+  var aperto = c.classList.toggle('show');
+  a.textContent = aperto ? '▲' : '▼';
+}
+
+function cancellaDatiApp() {
+  try {
+    localStorage.removeItem(SCH_KEY);
+    localStorage.removeItem(DST_KEY);
+    localStorage.removeItem(MOTOR_KEY);
+    showToast('✅ Dati app cancellati!');
+    log('Tutti i dati locali cancellati', 'ok');
+    setTimeout(function() {
+      alert('Dati cancellati!\n\nPer rimuovere completamente l\'icona:\n1. Tieni premuta l\'icona 🚪 sulla schermata Home\n2. Tocca "Rimuovi app"\n3. Conferma l\'eliminazione');
+    }, 800);
+  } catch(e) {
+    log('Errore cancellazione dati: ' + e.message, 'err');
+  }
+}
+
+/* ── ORA LEGALE ──────────────────────────────────── */
+function ultimaDomenica(anno, mese) {
+  var d = new Date(anno, mese + 1, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+function calcolaAuto() {
+  var now    = new Date();
+  var anno   = now.getFullYear();
+  var inizio = ultimaDomenica(anno, 2); inizio.setHours(2,0,0,0);
+  var fine   = ultimaDomenica(anno, 9); fine.setHours(3,0,0,0);
+  return now >= inizio && now < fine;
+}
+function isOraLegale() { return manualeDST !== null ? manualeDST : calcolaAuto(); }
+function getOffset()   { return isOraLegale() ? 7200 : 3600; }
+
+function aggiornaUIoraLegale() {
+  var legale  = isOraLegale();
+  var togDST  = document.getElementById('togDST');
+  var togAuto = document.getElementById('togAuto');
+  var badge   = document.getElementById('dstBadge');
+  togDST.classList.toggle('on', legale);
+  togAuto.classList.toggle('on', autoMode);
+  if (legale) {
+    badge.className   = 'dst-badge legale';
+    badge.textContent = '☀️ Ora legale (UTC+2)';
+  } else {
+    badge.className   = 'dst-badge solare';
+    badge.textContent = '🌙 Ora solare (UTC+1)';
+  }
+  if (online) {
+    mqttClient.publish(T_DST, String(getOffset()), {qos:1});
+    log('Offset NTP → Arduino: UTC+' + (getOffset()/3600), 'ok');
+  }
+}
+
+function toggleDST() {
+  autoMode   = false;
+  manualeDST = !isOraLegale();
+  aggiornaUIoraLegale();
+  salvaLocale();
+  showToast(isOraLegale() ? '☀️ Ora legale attivata' : '🌙 Ora solare attivata');
+}
+function toggleAuto() {
+  autoMode   = !autoMode;
+  manualeDST = autoMode ? null : calcolaAuto();
+  aggiornaUIoraLegale();
+  salvaLocale();
+  showToast(autoMode ? '🔄 Automatico attivato' : '✋ Controllo manuale');
+}
+
+/* ── PERSISTENZA LOCALE ──────────────────────────── */
+function salvaLocale() {
+  try {
+    localStorage.setItem(SCH_KEY,   JSON.stringify(sch));
+    localStorage.setItem(DST_KEY,   JSON.stringify({auto:autoMode, manuale:manualeDST}));
+    localStorage.setItem(MOTOR_KEY, JSON.stringify({apertura:durataApertura, chiusura:durataChiusura}));
+  } catch(e) { log('Errore salvataggio locale: '+e,'err'); }
+}
+
+function caricaLocale() {
+  var trovato = false;
+  try {
+    var ds = localStorage.getItem(SCH_KEY);
+    if (ds) { var s = JSON.parse(ds); if (s && s.length===7) { sch = s; trovato = true; } }
+    var dm = localStorage.getItem(MOTOR_KEY);
+    if (dm) { var m = JSON.parse(dm); durataApertura = m.apertura||10; durataChiusura = m.chiusura||10; }
+    var dd = localStorage.getItem(DST_KEY);
+    if (dd) { var d = JSON.parse(dd); autoMode = d.auto; manualeDST = d.manuale; trovato = true; }
+  } catch(e) { console.log('Errore caricamento: '+e); }
+  return trovato;
+}
+
+/* ── SELECT ORE/MINUTI ───────────────────────────── */
+function pad(n) { return n < 10 ? '0'+n : ''+n; }
+
+function makeHSel(id, val) {
+  var s = document.createElement('select');
+  s.className = 'ts'; s.id = id;
+  s.onchange = function() { aggiorna(id); };
+  for (var h = 0; h < 24; h++) {
+    var o = document.createElement('option');
+    o.value = h; o.textContent = pad(h);
+    if (h === val) o.selected = true;
+    s.appendChild(o);
+  }
+  return s;
+}
+function makeMSel(id, val) {
+  var mins = [0,5,10,15,20,25,30,35,40,45,50,55];
+  var s = document.createElement('select');
+  s.className = 'ts'; s.id = id;
+  s.onchange = function() { aggiorna(id); };
+  for (var m = 0; m < mins.length; m++) {
+    var o = document.createElement('option');
+    o.value = mins[m]; o.textContent = pad(mins[m]);
+    if (mins[m] === val) o.selected = true;
+    s.appendChild(o);
+  }
+  return s;
+}
+function makeSep() {
+  var sp = document.createElement('span');
+  sp.className = 'tsep'; sp.textContent = ':';
+  return sp;
+}
+function buildSelects() {
+  for (var i = 0; i < 7; i++) {
+    var a = document.getElementById('tgA'+i);
+    var c = document.getElementById('tgC'+i);
+    if (!a || !c) continue;
+    while (a.firstChild) a.removeChild(a.firstChild);
+    while (c.firstChild) c.removeChild(c.firstChild);
+    a.appendChild(makeHSel('aH'+i, sch[i].oraA));
+    a.appendChild(makeSep());
+    a.appendChild(makeMSel('aM'+i, sch[i].minA));
+    c.appendChild(makeHSel('cH'+i, sch[i].oraC));
+    c.appendChild(makeSep());
+    c.appendChild(makeMSel('cM'+i, sch[i].minC));
+  }
+}
+function aggiornaToggleGiorni() {
+  for (var i = 0; i < 7; i++) {
+    document.getElementById('tog'+i).classList.toggle('on',  sch[i].on);
+    document.getElementById('row'+i).classList.toggle('off', !sch[i].on);
+  }
+}
+function aggiorna(id) {
+  var tipo = id.substring(0,2);
+  var idx  = parseInt(id.substring(2));
+  var val  = parseInt(document.getElementById(id).value);
+  if (tipo==='aH') sch[idx].oraA=val;
+  if (tipo==='aM') sch[idx].minA=val;
+  if (tipo==='cH') sch[idx].oraC=val;
+  if (tipo==='cM') sch[idx].minC=val;
+  salvaLocale();
+}
+function toggleGiorno(i) {
+  sch[i].on = !sch[i].on;
+  document.getElementById('tog'+i).classList.toggle('on',  sch[i].on);
+  document.getElementById('row'+i).classList.toggle('off', !sch[i].on);
+  salvaLocale();
+}
+
+/* ── DURATA MOTORE ───────────────────────────────── */
+function cambiaDurata(tipo, delta) {
+  if (tipo === 'apertura') {
+    durataApertura = Math.min(60, Math.max(1, durataApertura + delta));
+    document.getElementById('lblApertura').textContent = durataApertura + 's';
+  } else {
+    durataChiusura = Math.min(60, Math.max(1, durataChiusura + delta));
+    document.getElementById('lblChiusura').textContent = durataChiusura + 's';
+  }
+  salvaLocale();
+}
+function aggiornaLblMotore() {
+  document.getElementById('lblApertura').textContent = durataApertura + 's';
+  document.getElementById('lblChiusura').textContent = durataChiusura + 's';
+}
+function inviaMotore() {
+  if (!online) { showToast('❌ Non connesso!'); return; }
+  var json = JSON.stringify({apertura: durataApertura, chiusura: durataChiusura});
+  mqttClient.publish(T_MOTOR, json, {qos:1}, function(e) {
+    if (!e) {
+      log('Durata: Apri='+durataApertura+'s Chiudi='+durataChiusura+'s','ok');
+      showToast(arduinoOnline === false ? '⚠️ Arduino offline' : '✓ Durata inviata');
+    }
+    else log('Errore durata motore','err');
+  });
+}
+
+/* ── SINCRONIZZA ORA ─────────────────────────────── */
+/* manuale = true solo quando lo chiede l'utente (mostra il toast) */
+function inviaOra(manuale) {
+  if (!online) { if (manuale) showToast('❌ Non connesso!'); return; }
+  var now  = new Date();
+  var json = JSON.stringify({
+    anno: now.getFullYear(), mese: now.getMonth()+1,
+    giorno: now.getDate(), ora: now.getHours(),
+    minuti: now.getMinutes(), secondi: now.getSeconds(),
+    wday: now.getDay(), offset: getOffset()
+  });
+  mqttClient.publish(T_TIME, json, {qos:1}, function(e) {
+    if (!e) {
+      log('Ora inviata: '+now.toLocaleTimeString('it-IT'),'ok');
+      if (manuale) showToast('🕐 Ora sincronizzata');
+    }
+    else log('Errore invio ora','err');
+  });
+}
+
+/* ── MQTT ────────────────────────────────────────── */
+function connetti() {
+  log('Connessione broker MQTT...','info');
+  try {
+    mqttClient = mqtt.connect(BROKER, {
+      clientId: CID, clean: true,
+      reconnectPeriod: 6000, connectTimeout: 20000,
+      keepalive: 30, protocolVersion: 4
+    });
+    mqttClient.on('connect', function() {
+      online = true; setDot(true);
+      log('Connesso al broker','ok');
+      mqttClient.subscribe(T_STAT, {qos:1});   /* riceve subito lo stato retained */
+      mqttClient.publish(T_DST, String(getOffset()), {qos:1});
+      setTimeout(function() { inviaOra(false); }, 1500);
+      if (!timerOra) timerOra = setInterval(function() { inviaOra(false); }, 60000);
+    });
+    mqttClient.on('message', function(t, p) {
+      if (t === T_STAT) aggiornaStato(p.toString());
+    });
+    mqttClient.on('error',    function(e) { log('Errore: '+e.message,'err'); });
+    mqttClient.on('offline',  function()  { online=false; arduinoOnline=null; setDot(false); log('Disconnesso','err'); });
+    mqttClient.on('reconnect',function()  { log('Riconnessione...','info'); });
+  } catch(e) { log('Errore connessione: '+e.message,'err'); }
+}
+
+function inviaCmd(cmd) {
+  if (!online) { showToast('❌ Non connesso!'); return; }
+  mqttClient.publish(T_CMD, cmd, {qos:1}, function(e) {
+    if (e) { log('Errore '+cmd,'err'); return; }
+    log('Inviato: '+cmd,'ok');
+    if (arduinoOnline === false) showToast('⚠️ Arduino offline: '+cmd+' non ricevuto');
+    else showToast('✓ Comando '+cmd+' inviato');
+  });
+}
+
+function salvaSchedule() {
+  if (!online) { showToast('❌ Non connesso!'); return; }
+  var btn = document.getElementById('btnSalva');
+  btn.disabled = true; btn.textContent = '⏳ Invio...';
+  var cnt = 0;
+  for (var i = 0; i < 7; i++) {
+    (function(idx) {
+      var s = sch[idx];
+      var json = '{"giorno":'+s.g+',"oraA":'+s.oraA+',"minA":'+s.minA+
+                 ',"oraC":'+s.oraC+',"minC":'+s.minC+
+                 ',"attivo":'+(s.on?'true':'false')+'}';
+      setTimeout(function() {
+        mqttClient.publish(T_SCHED, json, {qos:1}, function(e) {
+          if (!e) {
+            cnt++;
+            log('Schedule '+GIORNI[idx]+' OK','ok');
+            if (cnt===7) {
+              showToast(arduinoOnline === false ? '⚠️ Arduino offline' : '✅ Programmazione inviata!');
+              btn.disabled=false;
+              btn.innerHTML='💾 Salva programmazione';
+              salvaLocale();
+            }
+          } else {
+            log('Errore '+GIORNI[idx],'err');
+            btn.disabled=false;
+            btn.innerHTML='💾 Salva programmazione';
+          }
+        });
+      }, idx * 350);
+    })(i);
+  }
+}
+
+/* ── MODALE ──────────────────────────────────────── */
+function confermaReset() { document.getElementById('overlay').classList.add('show'); }
+function chiudiModale()  { document.getElementById('overlay').classList.remove('show'); }
+function eseguiReset()   { chiudiModale(); inviaCmd('RESET'); }
+
+/* ── UI ──────────────────────────────────────────── */
+function aggiornaStato(s) {
+  var map = {
+    'aperto':       {e:'🟢',l:'Aperto',           c:'aperto'},
+    'chiuso':       {e:'🔒',l:'Chiuso',           c:'chiuso'},
+    'reset':        {e:'🔴',l:'Reset eseguito',   c:''},
+    'online':       {e:'✅',l:'Arduino online',   c:''},
+    'offline':      {e:'⚠️',l:'Arduino offline',  c:'offline'},
+    'programma_ok': {e:'💾',l:'Programma OK',     c:''},
+    'motor_ok':     {e:'⚙️',l:'Durata impostata', c:''},
+    'ora_ok':       {e:'🕐',l:'Ora sincronizzata',c:''}
+  };
+  /* Qualsiasi messaggio diverso da "offline" significa che Arduino è vivo */
+  arduinoOnline = (s !== 'offline');
+  /* "ora_ok" arriva ogni minuto: solo nel log, non sovrascrive lo stato */
+  if (s === 'ora_ok') { log('Arduino: ora sincronizzata','ok'); return; }
+  var info = map[s] || {e:'❓',l:s,c:''};
+  var now  = new Date().toLocaleTimeString('it-IT');
+  document.getElementById('statusIcon').textContent  = info.e;
+  document.getElementById('statusIcon').className    = 'status-icon '+info.c;
+  document.getElementById('statusValue').textContent = info.l;
+  document.getElementById('statusTime').textContent  = 'Aggiornato: '+now;
+  log('Stato: '+s, s==='offline' ? 'err' : 'ok');
+}
+function setDot(on) {
+  document.getElementById('connDot').classList.toggle('online', on);
+  document.getElementById('connLabel').textContent =
+    on ? 'Connesso · test.mosquitto.org' : 'Disconnesso — riprovo...';
+}
+function log(msg, tipo) {
+  var b = document.getElementById('logBox');
+  var p = document.createElement('p');
+  var t = new Date().toLocaleTimeString('it-IT');
+  p.className   = tipo==='ok'?'log-ok':tipo==='err'?'log-err':'log-info';
+  p.textContent = '['+t+'] '+msg;
+  b.appendChild(p); b.scrollTop = b.scrollHeight;
+}
+function showToast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTm);
+  toastTm = setTimeout(function() { el.classList.remove('show'); }, 2600);
+}
+
+/* ── TOUCH HANDLER ──────────────────────────────────
+   Esegue il comando al rilascio del dito, una sola volta,
+   e NON lo esegue se il dito si sposta (scorrimento pagina).
+   Prima partiva al primo tocco: scorrendo sopra APRI
+   si poteva aprire lo sportello per sbaglio.
+──────────────────────────────────────────────────── */
+function tapBtn(id, fn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var x0 = 0, y0 = 0, attivo = false;
+  el.addEventListener('touchstart', function(e) {
+    var t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; attivo = true;
+    el.classList.add('pressed');
+  }, {passive:true});
+  el.addEventListener('touchmove', function(e) {
+    var t = e.touches[0];
+    if (Math.abs(t.clientX - x0) > 10 || Math.abs(t.clientY - y0) > 10) {
+      attivo = false; el.classList.remove('pressed');
+    }
+  }, {passive:true});
+  el.addEventListener('touchend', function(e) {
+    el.classList.remove('pressed');
+    if (attivo) { attivo = false; e.preventDefault(); if (!el.disabled) fn(); }
+  }, {passive:false});
+  el.addEventListener('touchcancel', function() {
+    attivo = false; el.classList.remove('pressed');
+  }, {passive:true});
+  el.addEventListener('click', function() { fn(); });  /* mouse / desktop */
+}
+
+/* ── AVVIO ───────────────────────────────────────── */
+var ripristinato = caricaLocale();
+if (!ripristinato) { autoMode = true; manualeDST = null; }
+aggiornaUIoraLegale();
+buildSelects();
+aggiornaToggleGiorni();
+aggiornaLblMotore();
+
+if (ripristinato) {
+  setTimeout(function() { showToast('📂 Impostazioni ripristinate!'); }, 1500);
+}
+
+tapBtn('btnApri',    function() { inviaCmd('APRI'); });
+tapBtn('btnChiudi',  function() { inviaCmd('CHIUDI'); });
+tapBtn('btnReset',   function() { confermaReset(); });
+tapBtn('btnSalva',   function() { salvaSchedule(); });
+tapBtn('btnMotore',  function() { inviaMotore(); });
+tapBtn('btnSincOra', function() { inviaOra(true); });
+
+setTimeout(function() {
+  if (typeof mqtt !== 'undefined') connetti();
+  else log('❌ Libreria MQTT non disponibile (serve internet)','err');
+}, 600);
+</script>
+</body>
+</html>
