@@ -215,7 +215,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <button class="btn-salva" id="btnSalva">💾 Salva programmazione</button>
 <button class="btn-salva" id="btnSincOra" style="background:#6366f1;margin-bottom:10px">🕐 Sincronizza ora con Arduino</button>
-<div class="footer-note">broker: test.mosquitto.org · WSS 8081 · topic: sportello02121962</div>
+<div class="footer-note">broker: broker.hivemq.com · WSS 8884 · topic: sportello02121962</div>
 
 <!-- MODALE RESET -->
 <div class="overlay" id="overlay">
@@ -232,7 +232,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <script>
 /* ── CONFIG ─────────────────────────────────────── */
-var BROKER  = 'wss://test.mosquitto.org:8081/mqtt';
+var BROKER  = 'wss://broker.hivemq.com:8884/mqtt';
 var CID     = 'and_' + Math.random().toString(36).substr(2,8);
 var T_CMD   = 'sportello02121962/cmd';
 var T_STAT  = 'sportello02121962/status';
@@ -517,7 +517,7 @@ function aggiornaStato(s){
 }
 function setDot(on){
   document.getElementById('connDot').classList.toggle('online',on);
-  document.getElementById('connLabel').textContent=on?'Connesso · test.mosquitto.org':'Disconnesso';
+  document.getElementById('connLabel').textContent=on?'Connesso · broker.hivemq.com':'Disconnesso';
 }
 function log(msg,tipo){
   var b=document.getElementById('logBox'),p=document.createElement('p'),t=new Date().toLocaleTimeString('it-IT');

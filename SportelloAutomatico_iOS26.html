@@ -495,7 +495,7 @@ body {
   </div>
 </div>
 
-<div class="footer-note">broker: test.mosquitto.org · topic: sportello02121962</div>
+<div class="footer-note">broker: broker.hivemq.com · topic: sportello02121962</div>
 
 <!-- MODALE RESET -->
 <div class="overlay" id="overlay">
@@ -513,7 +513,7 @@ body {
 
 <script>
 /* ── CONFIG ─────────────────────────────────────── */
-var BROKER   = 'wss://test.mosquitto.org:8081/mqtt';
+var BROKER   = 'wss://broker.hivemq.com:8884/mqtt';
 var CID      = 'ios_' + Math.random().toString(36).substr(2,9);
 var T_CMD    = 'sportello02121962/cmd';
 var T_STAT   = 'sportello02121962/status';
@@ -869,7 +869,7 @@ function aggiornaStato(s) {
 function setDot(on) {
   document.getElementById('connDot').classList.toggle('online', on);
   document.getElementById('connLabel').textContent =
-    on ? 'Connesso · test.mosquitto.org' : 'Disconnesso — riprovo...';
+    on ? 'Connesso · broker.hivemq.com' : 'Disconnesso — riprovo...';
 }
 function log(msg, tipo) {
   var b = document.getElementById('logBox');
